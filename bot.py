@@ -4,8 +4,12 @@ import asyncio
 import threading
 import http.server
 import socketserver
+import nest_asyncio  # 🔧 главное изменение
 from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+# Разрешаем повторное использование event loop
+nest_asyncio.apply()
 
 # 🌐 Фейковый веб-сервер, чтобы Render не завершал процесс
 def keep_alive():
@@ -132,11 +136,8 @@ async def main():
     app.add_handler(CommandHandler("start", start))
     asyncio.create_task(analyze_live_matches())
     print("🤖 Бот запущен и ждёт /start")
-    await app.run_polling(close_loop=False)
+    await app.run_polling()
 
 if __name__ == "__main__":
     print("🚀 Запуск умного футбольного прогнозиста...")
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        print("🛑 Остановка бота.")
+    asyncio.get_event_loop().run_until_complete(main())
