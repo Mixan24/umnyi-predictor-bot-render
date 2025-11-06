@@ -4,14 +4,10 @@ import asyncio
 import threading
 import http.server
 import socketserver
-import nest_asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# 🌀 Разрешаем повторные event-loop (нужно для Render)
-nest_asyncio.apply()
-
-# 🌐 Поддержка активности Render (чтобы не засыпал)
+# 🌐 Поддержка Render (чтобы не засыпал)
 def keep_alive():
     try:
         PORT = int(os.getenv("PORT", 10000))
@@ -25,17 +21,20 @@ def keep_alive():
 threading.Thread(target=keep_alive, daemon=True).start()
 
 # 🔑 Переменные окружения
-API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://umnyi-predictor-bot.onrender.com")
 
-# ✅ Основное приложение Telegram
+# 🌍 Webhook URL
+WEBHOOK_PATH = f"/{BOT_TOKEN}"
+WEBHOOK_URL = f"{RENDER_URL}{WEBHOOK_PATH}"
+
+# ⚙️ Telegram приложение
 app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-# Активные пользователи
 active_users = set()
 last_probabilities = {}
 
-# ⚽ Функция расчёта вероятности
+# ⚽ Формула вероятности гола
 def calculate_goal_probability(stats):
     try:
         attacks = stats.get("attacks", 0)
@@ -60,7 +59,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     print(f"[✅] Подключён пользователь: {chat_id} ({name})")
 
-# 🔍 Основной анализ матчей
+# 🔍 Анализ матчей (каждые 2 мин)
 async def analyze_live_matches():
     url = "https://v3.football.api-sports.io/fixtures?live=all"
     headers = {"x-apisports-key": API_KEY}
@@ -97,7 +96,7 @@ async def analyze_live_matches():
                     prob = calculate_goal_probability(values)
                     key = f"{home}-{away}"
 
-                    # 📈 Рост давления
+                    # 📈 Уведомление о росте давления
                     last = last_probabilities.get(key, 0)
                     if 60 <= last < prob and prob - last >= 10:
                         for user in active_users:
@@ -111,7 +110,7 @@ async def analyze_live_matches():
 
                     last_probabilities[key] = prob
 
-                    # ⚽ Возможен гол
+                    # ⚽ Основной сигнал (>80 %)
                     if prob >= 80 and key not in alerted:
                         msg = (
                             f"⚽ Возможен гол!\n"
@@ -128,13 +127,26 @@ async def analyze_live_matches():
             print(f"Ошибка анализа: {e}")
         await asyncio.sleep(120)
 
-# 🚀 Запуск
+# 🚀 Основной запуск с Webhook
 async def main():
     app.add_handler(CommandHandler("start", start))
     asyncio.create_task(analyze_live_matches())
-    print("🤖 Бот запущен и ждёт /start")
-    await app.run_polling(drop_pending_updates=True)
+
+    # Удаляем старый webhook, если был
+    await app.bot.delete_webhook(drop_pending_updates=True)
+
+    # Устанавливаем новый webhook
+    await app.bot.set_webhook(url=WEBHOOK_URL)
+    print(f"🤖 Webhook установлен: {WEBHOOK_URL}")
+
+    # Запуск сервера Telegram
+    await app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 10000)),
+        url_path=BOT_TOKEN,
+        webhook_url=WEBHOOK_URL
+    )
 
 if __name__ == "__main__":
-    print("🚀 Запуск умного футбольного прогнозиста...")
+    print("🚀 Запуск умного футбольного прогнозиста (webhook mode)...")
     asyncio.run(main())
