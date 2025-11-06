@@ -4,14 +4,14 @@ import asyncio
 import threading
 import http.server
 import socketserver
-import nest_asyncio  # 🔧 главное изменение
-from telegram import Bot, Update
+import nest_asyncio
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Разрешаем повторное использование event loop
+# Разрешаем повторный запуск event loop
 nest_asyncio.apply()
 
-# 🌐 Фейковый веб-сервер, чтобы Render не завершал процесс
+# 🌐 Фейковый сервер, чтобы Render не глушил процесс
 def keep_alive():
     try:
         PORT = int(os.getenv("PORT", 10000))
@@ -28,10 +28,10 @@ threading.Thread(target=keep_alive, daemon=True).start()
 API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-bot = Bot(token=BOT_TOKEN)
+# ✅ Основной Telegram Application
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 active_users = set()
-last_probabilities = {}  # храним изменения по матчам
+last_probabilities = {}
 
 # ⚽ Расчёт вероятности гола
 def calculate_goal_probability(stats):
@@ -45,7 +45,7 @@ def calculate_goal_probability(stats):
     except Exception:
         return 0.0
 
-# 👋 /start — регистрация пользователя
+# 👋 /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     name = update.effective_user.first_name
@@ -72,7 +72,7 @@ async def analyze_live_matches():
 
             if not matches:
                 for user in active_users:
-                    await bot.send_message(user, "⚽ Сейчас нет активных матчей.")
+                    await app.bot.send_message(user, "⚽ Сейчас нет активных матчей.")
             else:
                 for match in matches:
                     league = match["league"]["name"]
@@ -95,11 +95,11 @@ async def analyze_live_matches():
                     prob = calculate_goal_probability(values)
                     key = f"{home}-{away}"
 
-                    # 📈 Раннее предупреждение — если рост давления > 10 %
+                    # 📈 Рост давления
                     last = last_probabilities.get(key, 0)
                     if 60 <= last < prob and prob - last >= 10:
                         for user in active_users:
-                            await bot.send_message(
+                            await app.bot.send_message(
                                 user,
                                 f"📈 Давление растёт!\n"
                                 f"⚔️ {home} — {away}\n"
@@ -109,7 +109,7 @@ async def analyze_live_matches():
 
                     last_probabilities[key] = prob
 
-                    # ⚽ Основное предупреждение (>80 %)
+                    # ⚽ Гол возможен
                     if prob >= 80 and key not in alerted:
                         msg = (
                             f"⚽ Возможен гол!\n"
@@ -119,19 +119,19 @@ async def analyze_live_matches():
                             f"📊 Вероятность: {prob}%"
                         )
                         for user in active_users:
-                            await bot.send_message(user, msg)
+                            await app.bot.send_message(user, msg)
                         alerted.add(key)
 
         except Exception as e:
             for user in active_users:
                 try:
-                    await bot.send_message(user, f"❌ Ошибка анализа: {e}")
+                    await app.bot.send_message(user, f"❌ Ошибка анализа: {e}")
                 except:
                     pass
 
-        await asyncio.sleep(120)  # проверка каждые 2 мин
+        await asyncio.sleep(120)  # каждые 2 минуты
 
-# 🚀 Запуск
+# 🚀 Главная функция
 async def main():
     app.add_handler(CommandHandler("start", start))
     asyncio.create_task(analyze_live_matches())
