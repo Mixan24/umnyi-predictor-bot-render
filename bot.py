@@ -3,65 +3,44 @@ import requests
 import asyncio
 from telegram import Bot
 
-# 🔑 Токены
+# 🔑 Ключи из Render Environment
 API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 
-# 💬 Укажи свой Telegram ID (узнай через бота @userinfobot)
-YOUR_CHAT_ID = 123456789  # 👉 замени на свой ID
+# ⚙️ Укажи свой Telegram ID (узнай через @userinfobot)
+YOUR_CHAT_ID = 123456789  # ← замени на свой ID!
 
-# 🔍 Основная функция анализа
-async def analyze_live_matches():
-    url_live = "https://v3.football.api-sports.io/fixtures?live=all"
+async def check_live_matches():
+    url = "https://v3.football.api-sports.io/fixtures?live=all"
     headers = {"x-apisports-key": API_KEY}
 
     while True:
         try:
-            live = requests.get(url_live, headers=headers).json()
-            for match in live.get("response", []):
-                fixture_id = match["fixture"]["id"]
-                home = match["teams"]["home"]["name"]
-                away = match["teams"]["away"]["name"]
-                score = f"{match['goals']['home']}:{match['goals']['away']}"
+            response = requests.get(url, headers=headers, timeout=30)
+            data = response.json()
 
-                # Запрос статистики матча
-                stats_url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
-                stats = requests.get(stats_url, headers=headers).json()
+            matches = data.get("response", [])
+            if not matches:
+                await bot.send_message(YOUR_CHAT_ID, "⚽ Сейчас нет активных матчей.")
+            else:
+                msg = "🔥 Текущие лайв-матчи:\n\n"
+                for match in matches:
+                    league = match["league"]["name"]
+                    home = match["teams"]["home"]["name"]
+                    away = match["teams"]["away"]["name"]
+                    score_h = match["goals"]["home"]
+                    score_a = match["goals"]["away"]
+                    minute = match["fixture"]["status"]["elapsed"]
+                    msg += f"🏆 {league}\n⚔️ {home} — {away}\n⏱️ {minute}'  |  {score_h}:{score_a}\n\n"
 
-                if not stats["response"]:
-                    continue
-
-                for team_stats in stats["response"]:
-                    team_name = team_stats["team"]["name"]
-                    data = {s["type"]: s["value"] for s in team_stats["statistics"]}
-
-                    # 📊 Извлекаем ключевые метрики
-                    shots_on = data.get("Shots on Goal", 0) or 0
-                    dangerous_attacks = data.get("Dangerous Attacks", 0) or 0
-                    possession = int((data.get("Ball Possession", "0%") or "0%").replace("%", ""))
-
-                    # 🧠 Простая формула вероятности гола
-                    prob = (shots_on * 6 + dangerous_attacks * 0.6 + possession * 0.5) / 10
-
-                    if prob > 80:
-                        await bot.send_message(
-                            chat_id=YOUR_CHAT_ID,
-                            text=(
-                                f"⚡ Возможен гол в ближайшие минуты!\n"
-                                f"Матч: {home} — {away}\n"
-                                f"Команда: {team_name}\n"
-                                f"Счёт: {score}\n"
-                                f"Вероятность гола: {prob:.1f}%"
-                            )
-                        )
-                        await asyncio.sleep(30)
+                await bot.send_message(YOUR_CHAT_ID, msg)
 
         except Exception as e:
-            print("Ошибка анализа:", e)
+            await bot.send_message(YOUR_CHAT_ID, f"❌ Ошибка: {e}")
 
-        await asyncio.sleep(120)  # Проверка каждые 2 минуты
+        await asyncio.sleep(180)  # Проверять каждые 3 минуты
 
 # 🚀 Запуск
 if __name__ == "__main__":
-    asyncio.run(analyze_live_matches())
+    asyncio.run(check_live_matches())
