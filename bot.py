@@ -1,9 +1,22 @@
 import os
 import requests
 import asyncio
+import threading
+import http.server
+import socketserver
 from telegram import Bot
 
-# 🔑 Ключи из Render Environment
+# 🌿 Запускаем фейковый сервер, чтобы Render не ругался на отсутствие порта
+def keep_alive():
+    PORT = int(os.getenv("PORT", 10000))
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), handler) as httpd:
+        print(f"🌐 Dummy server running on port {PORT}")
+        httpd.serve_forever()
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
+# 🔑 Ключи окружения
 API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 bot = Bot(token=BOT_TOKEN)
@@ -32,7 +45,7 @@ async def check_live_matches():
                     score_h = match["goals"]["home"]
                     score_a = match["goals"]["away"]
                     minute = match["fixture"]["status"]["elapsed"]
-                    msg += f"🏆 {league}\n⚔️ {home} — {away}\n⏱️ {minute}'  |  {score_h}:{score_a}\n\n"
+                    msg += f"🏆 {league}\n⚔️ {home} — {away}\n⏱️ {minute}' | {score_h}:{score_a}\n\n"
 
                 await bot.send_message(YOUR_CHAT_ID, msg)
 
