@@ -50,7 +50,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👋 Привет, {name}!\n"
         f"Ты подключён к системе ⚽ прогнозов.\n"
         f"Я сообщу, когда вероятность гола превысит 80 %, "
-        f"и даже заранее — если давление растёт 📈"
+        f"и заранее — если давление растёт 📈"
     )
     print(f"[✅] Подключён пользователь: {chat_id} ({name})")
 
@@ -128,30 +128,15 @@ async def analyze_live_matches():
         await asyncio.sleep(120)  # проверка каждые 2 мин
 
 # 🚀 Запуск
-async def run_bot():
+async def main():
     app.add_handler(CommandHandler("start", start))
     asyncio.create_task(analyze_live_matches())
     print("🤖 Бот запущен и ждёт /start")
-    await app.initialize()
-    await app.start()
-
-    # ⛔ Проверяем, не запущен ли уже polling
-    if not app.updater.running:
-        await app.updater.start_polling()
-
-    await asyncio.Event().wait()
+    await app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
-    import sys
-    import os
-
+    print("🚀 Запуск умного футбольного прогнозиста...")
     try:
-        pid = os.getpid()
-        print(f"🧠 PID процесса: {pid}")
-    except Exception:
-        pass
-
-    try:
-        asyncio.run(run_bot())
-    except RuntimeError:
-        print("⚠️ Цикл событий уже запущен — предотвращён повторный запуск.")
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("🛑 Остановка бота.")
