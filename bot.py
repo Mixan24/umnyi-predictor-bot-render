@@ -41,7 +41,7 @@ def calculate_goal_probability(stats):
     except Exception:
         return 0.0
 
-# 👋 /start
+# 👋 /start — регистрация пользователя
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     name = update.effective_user.first_name
@@ -120,7 +120,10 @@ async def analyze_live_matches():
 
         except Exception as e:
             for user in active_users:
-                await bot.send_message(user, f"❌ Ошибка анализа: {e}")
+                try:
+                    await bot.send_message(user, f"❌ Ошибка анализа: {e}")
+                except:
+                    pass
 
         await asyncio.sleep(120)  # проверка каждые 2 мин
 
@@ -131,8 +134,24 @@ async def run_bot():
     print("🤖 Бот запущен и ждёт /start")
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
+
+    # ⛔ Проверяем, не запущен ли уже polling
+    if not app.updater.running:
+        await app.updater.start_polling()
+
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    asyncio.run(run_bot())
+    import sys
+    import os
+
+    try:
+        pid = os.getpid()
+        print(f"🧠 PID процесса: {pid}")
+    except Exception:
+        pass
+
+    try:
+        asyncio.run(run_bot())
+    except RuntimeError:
+        print("⚠️ Цикл событий уже запущен — предотвращён повторный запуск.")
