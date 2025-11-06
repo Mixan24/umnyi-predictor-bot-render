@@ -1,92 +1,108 @@
 import os
 import logging
-import random
 import requests
+from datetime import date
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-# 🌿 Логи
+# 🌿 Настройка логов
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# 🔑 Переменные окружения
+# 🔑 Ключи и токены из переменных окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PROXY_URL = os.getenv("PROXY_URL", "https://umnyi-fermer-proxy.onrender.com")
+FOOTBALL_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 
-# ⚽ Приветствие
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN не найден в переменных окружения.")
+if not FOOTBALL_API_KEY:
+    raise ValueError("❌ FOOTBALL_DATA_API_KEY не найден в переменных окружения.")
+
+# 🌍 URL API
+BASE_URL = "https://api.football-data.org/v4/matches"
+
+# 👋 Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "⚽ Привет! Я футбольный бот Умного фермера!\n"
-        "Напиши название двух команд — и я дам прогноз на матч.\n\n"
-        "Пример: Барселона Реал"
+    text = (
+        "⚽ Привет! Это футбольный бот от Умного Фермера.\n\n"
+        "📋 Команды:\n"
+        "• /live — показать матчи, которые идут прямо сейчас\n"
+        "• /today — показать все матчи на сегодня\n"
+        "• /help — помощь"
     )
+    await update.message.reply_text(text)
 
-# 🎯 Генератор простого прогноза (если без ИИ)
-def simple_prediction(team1, team2):
-    outcomes = [
-        f"Победит {team1} ✅",
-        f"Победит {team2} ⚽",
-        "Ничья 🤝",
-        f"{team1} забьёт первым ⚡",
-        f"{team2} удивит и выиграет в концовке 🔥"
-    ]
-    confidence = random.randint(55, 90)
-    return f"Прогноз: {random.choice(outcomes)}\nВероятность: {confidence}%"
+# 🆘 Команда /help
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⚙️ Используй /live для лайв-матчей и /today для матчей на сегодня ⚽")
 
-# 💬 Основной обработчик сообщений
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    await update.message.reply_text("🤔 Анализирую матч...")
-
+# 📺 LIVE-матчи
+async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     try:
-        # Разбиваем сообщение на команды
-        words = text.split()
-        if len(words) < 2:
-            await update.message.reply_text("❗ Введите две команды, например: Барселона Реал")
-            return
-
-        team1, team2 = words[0], words[1]
-
-        # 🧠 Запрос через OpenAI-прокси
-        response = requests.post(
-            f"{PROXY_URL}/ask",
-            json={
-                "prompt": f"Сделай краткий прогноз на футбольный матч {team1} против {team2}. "
-                          "Укажи вероятного победителя и счёт.",
-                "key": OPENAI_API_KEY
-            },
-            timeout=30
-        )
-
-        if response.status_code == 200:
-            answer = response.json().get("reply")
-            if answer:
-                await update.message.reply_text(f"⚽ {answer}")
-            else:
-                await update.message.reply_text(simple_prediction(team1, team2))
-        else:
-            await update.message.reply_text(simple_prediction(team1, team2))
-
+        response = requests.get(BASE_URL, headers=headers, timeout=10)
+        data = response.json().get("matches", [])
     except Exception as e:
         logging.error(e)
-        await update.message.reply_text("⚠️ Не удалось получить прогноз. Пробую без ИИ...")
-        try:
-            words = text.split()
-            if len(words) >= 2:
-                await update.message.reply_text(simple_prediction(words[0], words[1]))
-            else:
-                await update.message.reply_text("Введите две команды, например: Барселона Реал")
-        except Exception as inner_e:
-            logging.error(inner_e)
-            await update.message.reply_text("🚧 Ошибка при обработке запроса.")
+        await update.message.reply_text("🚧 Ошибка при получении данных от Football API.")
+        return
+
+    live_games = []
+    for m in data:
+        if m.get("status") in ("IN_PLAY", "PAUSED"):
+            home = m["homeTeam"]["name"]
+            away = m["awayTeam"]["name"]
+            score = m["score"]["fullTime"]
+            live_games.append(f"{home} {score['home']} : {score['away']} {away}")
+
+    if live_games:
+        text = "📺 <b>LIVE-матчи:</b>\n\n" + "\n".join(live_games)
+        await update.message.reply_text(text, parse_mode="HTML")
+    else:
+        await update.message.reply_text("⚽ Сейчас нет активных матчей.")
+
+# 📅 Матчи на сегодня
+async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    today_str = date.today().isoformat()
+
+    try:
+        response = requests.get(f"{BASE_URL}?dateFrom={today_str}&dateTo={today_str}", headers=headers, timeout=10)
+        data = response.json().get("matches", [])
+    except Exception as e:
+        logging.error(e)
+        await update.message.reply_text("🚧 Ошибка при получении данных от Football API.")
+        return
+
+    if not data:
+        await update.message.reply_text("📭 Сегодня нет запланированных матчей.")
+        return
+
+    lines = []
+    for m in data:
+        home = m["homeTeam"]["name"]
+        away = m["awayTeam"]["name"]
+        status = m["status"]
+        time = m.get("utcDate", "")[11:16]
+        lines.append(f"🕒 {time} — {home} 🆚 {away} ({status})")
+
+    text = "📅 <b>Матчи на сегодня:</b>\n\n" + "\n".join(lines)
+    await update.message.reply_text(text, parse_mode="HTML")
 
 # 🚀 Запуск
-if __name__ == "__main__":
+def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("✅ Футбольный бот запущен!")
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("live", live))
+    app.add_handler(CommandHandler("today", today))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, help_command))
+
+    logging.info("✅ Бот запущен и слушает команды...")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
