@@ -1,108 +1,67 @@
 import os
-import logging
 import requests
-from datetime import date
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+import asyncio
+from telegram import Bot
 
-# 🌿 Настройка логов
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+# 🔑 Токены
+API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+bot = Bot(token=BOT_TOKEN)
 
-# 🔑 Ключи и токены из переменных окружения
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-FOOTBALL_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
+# 💬 Укажи свой Telegram ID (узнай через бота @userinfobot)
+YOUR_CHAT_ID = 123456789  # 👉 замени на свой ID
 
-if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN не найден в переменных окружения.")
-if not FOOTBALL_API_KEY:
-    raise ValueError("❌ FOOTBALL_DATA_API_KEY не найден в переменных окружения.")
+# 🔍 Основная функция анализа
+async def analyze_live_matches():
+    url_live = "https://v3.football.api-sports.io/fixtures?live=all"
+    headers = {"x-apisports-key": API_KEY}
 
-# 🌍 URL API
-BASE_URL = "https://api.football-data.org/v4/matches"
+    while True:
+        try:
+            live = requests.get(url_live, headers=headers).json()
+            for match in live.get("response", []):
+                fixture_id = match["fixture"]["id"]
+                home = match["teams"]["home"]["name"]
+                away = match["teams"]["away"]["name"]
+                score = f"{match['goals']['home']}:{match['goals']['away']}"
 
-# 👋 Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "⚽ Привет! Это футбольный бот от Умного Фермера.\n\n"
-        "📋 Команды:\n"
-        "• /live — показать матчи, которые идут прямо сейчас\n"
-        "• /today — показать все матчи на сегодня\n"
-        "• /help — помощь"
-    )
-    await update.message.reply_text(text)
+                # Запрос статистики матча
+                stats_url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
+                stats = requests.get(stats_url, headers=headers).json()
 
-# 🆘 Команда /help
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⚙️ Используй /live для лайв-матчей и /today для матчей на сегодня ⚽")
+                if not stats["response"]:
+                    continue
 
-# 📺 LIVE-матчи
-async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    try:
-        response = requests.get(BASE_URL, headers=headers, timeout=10)
-        data = response.json().get("matches", [])
-    except Exception as e:
-        logging.error(e)
-        await update.message.reply_text("🚧 Ошибка при получении данных от Football API.")
-        return
+                for team_stats in stats["response"]:
+                    team_name = team_stats["team"]["name"]
+                    data = {s["type"]: s["value"] for s in team_stats["statistics"]}
 
-    live_games = []
-    for m in data:
-        if m.get("status") in ("IN_PLAY", "PAUSED"):
-            home = m["homeTeam"]["name"]
-            away = m["awayTeam"]["name"]
-            score = m["score"]["fullTime"]
-            live_games.append(f"{home} {score['home']} : {score['away']} {away}")
+                    # 📊 Извлекаем ключевые метрики
+                    shots_on = data.get("Shots on Goal", 0) or 0
+                    dangerous_attacks = data.get("Dangerous Attacks", 0) or 0
+                    possession = int((data.get("Ball Possession", "0%") or "0%").replace("%", ""))
 
-    if live_games:
-        text = "📺 <b>LIVE-матчи:</b>\n\n" + "\n".join(live_games)
-        await update.message.reply_text(text, parse_mode="HTML")
-    else:
-        await update.message.reply_text("⚽ Сейчас нет активных матчей.")
+                    # 🧠 Простая формула вероятности гола
+                    prob = (shots_on * 6 + dangerous_attacks * 0.6 + possession * 0.5) / 10
 
-# 📅 Матчи на сегодня
-async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    today_str = date.today().isoformat()
+                    if prob > 80:
+                        await bot.send_message(
+                            chat_id=YOUR_CHAT_ID,
+                            text=(
+                                f"⚡ Возможен гол в ближайшие минуты!\n"
+                                f"Матч: {home} — {away}\n"
+                                f"Команда: {team_name}\n"
+                                f"Счёт: {score}\n"
+                                f"Вероятность гола: {prob:.1f}%"
+                            )
+                        )
+                        await asyncio.sleep(30)
 
-    try:
-        response = requests.get(f"{BASE_URL}?dateFrom={today_str}&dateTo={today_str}", headers=headers, timeout=10)
-        data = response.json().get("matches", [])
-    except Exception as e:
-        logging.error(e)
-        await update.message.reply_text("🚧 Ошибка при получении данных от Football API.")
-        return
+        except Exception as e:
+            print("Ошибка анализа:", e)
 
-    if not data:
-        await update.message.reply_text("📭 Сегодня нет запланированных матчей.")
-        return
-
-    lines = []
-    for m in data:
-        home = m["homeTeam"]["name"]
-        away = m["awayTeam"]["name"]
-        status = m["status"]
-        time = m.get("utcDate", "")[11:16]
-        lines.append(f"🕒 {time} — {home} 🆚 {away} ({status})")
-
-    text = "📅 <b>Матчи на сегодня:</b>\n\n" + "\n".join(lines)
-    await update.message.reply_text(text, parse_mode="HTML")
+        await asyncio.sleep(120)  # Проверка каждые 2 минуты
 
 # 🚀 Запуск
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("live", live))
-    app.add_handler(CommandHandler("today", today))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, help_command))
-
-    logging.info("✅ Бот запущен и слушает команды...")
-    app.run_polling()
-
 if __name__ == "__main__":
-    main()
+    asyncio.run(analyze_live_matches())
