@@ -8,10 +8,10 @@ import nest_asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Разрешаем повторный запуск event loop
+# 🌀 Разрешаем повторные event-loop (нужно для Render)
 nest_asyncio.apply()
 
-# 🌐 Фейковый сервер, чтобы Render не глушил процесс
+# 🌐 Поддержка активности Render (чтобы не засыпал)
 def keep_alive():
     try:
         PORT = int(os.getenv("PORT", 10000))
@@ -28,12 +28,14 @@ threading.Thread(target=keep_alive, daemon=True).start()
 API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# ✅ Основной Telegram Application
+# ✅ Основное приложение Telegram
 app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+# Активные пользователи
 active_users = set()
 last_probabilities = {}
 
-# ⚽ Расчёт вероятности гола
+# ⚽ Функция расчёта вероятности
 def calculate_goal_probability(stats):
     try:
         attacks = stats.get("attacks", 0)
@@ -58,7 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     print(f"[✅] Подключён пользователь: {chat_id} ({name})")
 
-# 🔍 Анализ лайв-матчей
+# 🔍 Основной анализ матчей
 async def analyze_live_matches():
     url = "https://v3.football.api-sports.io/fixtures?live=all"
     headers = {"x-apisports-key": API_KEY}
@@ -109,7 +111,7 @@ async def analyze_live_matches():
 
                     last_probabilities[key] = prob
 
-                    # ⚽ Гол возможен
+                    # ⚽ Возможен гол
                     if prob >= 80 and key not in alerted:
                         msg = (
                             f"⚽ Возможен гол!\n"
@@ -123,21 +125,16 @@ async def analyze_live_matches():
                         alerted.add(key)
 
         except Exception as e:
-            for user in active_users:
-                try:
-                    await app.bot.send_message(user, f"❌ Ошибка анализа: {e}")
-                except:
-                    pass
+            print(f"Ошибка анализа: {e}")
+        await asyncio.sleep(120)
 
-        await asyncio.sleep(120)  # каждые 2 минуты
-
-# 🚀 Главная функция
+# 🚀 Запуск
 async def main():
     app.add_handler(CommandHandler("start", start))
     asyncio.create_task(analyze_live_matches())
     print("🤖 Бот запущен и ждёт /start")
-    await app.run_polling()
+    await app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     print("🚀 Запуск умного футбольного прогнозиста...")
-    asyncio.get_event_loop().run_until_complete(main())
+    asyncio.run(main())
