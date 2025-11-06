@@ -1,5 +1,6 @@
-aiogram==2.25.1
+python-telegram-bot==20.3
+requests
+aiohttp
 python-dotenv
-aiosqlite
 tabulate
 schedule
