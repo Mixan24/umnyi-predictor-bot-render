@@ -7,7 +7,7 @@ import socketserver
 from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# 🌐 Фейковый веб-сервер (Render требует открытый порт)
+# 🌐 Фейковый веб-сервер, чтобы Render не завершал процесс
 def keep_alive():
     try:
         PORT = int(os.getenv("PORT", 10000))
@@ -27,6 +27,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 active_users = set()
+last_probabilities = {}  # храним изменения по матчам
 
 # ⚽ Расчёт вероятности гола
 def calculate_goal_probability(stats):
@@ -40,19 +41,20 @@ def calculate_goal_probability(stats):
     except Exception:
         return 0.0
 
-# 👋 Команда /start
+# 👋 /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    first_name = update.effective_user.first_name
+    name = update.effective_user.first_name
     active_users.add(chat_id)
     await update.message.reply_text(
-        f"👋 Привет, {first_name}!\n"
+        f"👋 Привет, {name}!\n"
         f"Ты подключён к системе ⚽ прогнозов.\n"
-        f"Я буду присылать уведомления, если вероятность гола > 80 %."
+        f"Я сообщу, когда вероятность гола превысит 80 %, "
+        f"и даже заранее — если давление растёт 📈"
     )
-    print(f"[✅] Подключён новый пользователь: {chat_id} ({first_name})")
+    print(f"[✅] Подключён пользователь: {chat_id} ({name})")
 
-# 🔄 Анализ матчей
+# 🔍 Анализ лайв-матчей
 async def analyze_live_matches():
     url = "https://v3.football.api-sports.io/fixtures?live=all"
     headers = {"x-apisports-key": API_KEY}
@@ -89,6 +91,21 @@ async def analyze_live_matches():
                     prob = calculate_goal_probability(values)
                     key = f"{home}-{away}"
 
+                    # 📈 Раннее предупреждение — если рост давления > 10 %
+                    last = last_probabilities.get(key, 0)
+                    if 60 <= last < prob and prob - last >= 10:
+                        for user in active_users:
+                            await bot.send_message(
+                                user,
+                                f"📈 Давление растёт!\n"
+                                f"⚔️ {home} — {away}\n"
+                                f"⏱️ {minute}' минута\n"
+                                f"📊 Вероятность: {last}% → {prob}%"
+                            )
+
+                    last_probabilities[key] = prob
+
+                    # ⚽ Основное предупреждение (>80 %)
                     if prob >= 80 and key not in alerted:
                         msg = (
                             f"⚽ Возможен гол!\n"
@@ -105,17 +122,17 @@ async def analyze_live_matches():
             for user in active_users:
                 await bot.send_message(user, f"❌ Ошибка анализа: {e}")
 
-        await asyncio.sleep(120)  # Проверка каждые 2 мин
+        await asyncio.sleep(120)  # проверка каждые 2 мин
 
-# 🚀 Без двойного запуска event loop
+# 🚀 Запуск
 async def run_bot():
     app.add_handler(CommandHandler("start", start))
     asyncio.create_task(analyze_live_matches())
-    print("🤖 Бот запущен и ждёт команды /start")
+    print("🤖 Бот запущен и ждёт /start")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    await asyncio.Event().wait()  # держим поток открытым
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
