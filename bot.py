@@ -22,7 +22,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 
 # 🧍 Укажи свой Telegram ID
-YOUR_CHAT_ID = 123456789  # ← замени на свой ID!
+YOUR_CHAT_ID = 337745647  # ← замени на свой ID!
 
 # ⚽ Функция подсчёта вероятности гола
 def calculate_goal_probability(stats):
